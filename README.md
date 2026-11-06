@@ -18,7 +18,7 @@ Use a current LTS Node release that supports Vite. Run `npm ci` and `npm run dev
    values ('member@example.com');
    ```
 
-5. Share the app URL ending in `/#claim`. Supabase checks the roster when a new address requests a code. The member chooses a username and password, then enters the code before the app saves their credentials. On later visits they sign in with email and password.
+5. The claim page is the app URL ending in `/#claim`. Supabase checks the roster when a new address requests a code. After verifying the code, a new member chooses a username and password. On later visits they sign in with email and password.
 
 The roster stays in a private schema. Database policies check current membership on every read of the library and confine progress to its owner. Remove a departing member from the Supabase roster and the relevant Drive permissions.
 
@@ -30,4 +30,8 @@ Share the replay folder as **Viewer** with the club’s Google accounts or priva
 
 This first build accepts existing Drive file IDs. The scheduled Drive folder sync is a follow-up once the folder IDs and recording workflow are known.
 
-Run `npm run build` to produce the static site in `dist/`.
+## Deploy the beta
+
+Set GitHub Pages to **GitHub Actions** and set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` as repository variables. The workflow builds and deploys `main`. Local production builds also require those values and produce the static site in `dist/`. Use `npm run dev:demo` for sample mode.
+
+Set Supabase’s Site URL to the complete Pages URL, including the project path and trailing slash. Add its exact `?recover=1` URL to **Redirect URLs** for password resets. Verify signup, password reset and an authenticated replay before sharing the claim link.

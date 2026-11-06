@@ -4,8 +4,10 @@ import './style.css';
 
 const url = import.meta.env.VITE_SUPABASE_URL;
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-const demo = (import.meta.env.DEV && import.meta.env.MODE === 'demo') || (!url && !key);
+const demo = import.meta.env.DEV && import.meta.env.MODE === 'demo';
 const demoArchive = import.meta.env.DEV && import.meta.env.VITE_DEMO_CATALOGUE;
+const resetRequested = new URLSearchParams(location.search).get('recover') === '1';
+const authCallback = new URLSearchParams(location.hash.slice(1));
 const supabase = !demo && url && key ? createClient(url, key) : null;
 const app = document.querySelector('#app');
 const dateFormat = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
@@ -13,7 +15,6 @@ const dateFormat = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'lo
 const entryView = () => location.hash === '#claim' ? 'claim' : 'sign-in';
 let view = demo ? entryView() : 'loading';
 let email = '';
-let draft = null;
 let user = null;
 let texts = [];
 let watched = new Set();
@@ -30,11 +31,11 @@ const textLink = (text, sitting) => `#text/${encodeURIComponent(text.id)}${sitti
 const authViews = {
   'sign-in': ['Return to the circle', 'Sign in to find your sittings and reading resources.'],
   claim: ['Claim your account', 'Enter the email address you used to join Briggs’ Book Club.'],
-  choose: ['Make it yours', 'You’re on the list. Choose a username and password.'],
   verify: ['Check your email', 'Enter the one-time code to confirm your book club email.'],
-  finish: ['Finish setting up', 'Choose a username and password for your verified account.'],
+  finish: ['Make it yours', 'Your email is verified. Choose a username and password.'],
   forgot: ['Reset your password', 'We’ll send a reset link to your book club email.'],
   reset: ['Choose a new password', 'Enter the new password you want to use for your account.'],
+  'reset-expired': ['Request a new reset link', 'This password reset link is missing, expired or already used.'],
   blocked: ['Check your membership', 'This email no longer has access. Contact the club if you think this is a mistake.'],
 };
 
@@ -48,10 +49,9 @@ function authForm() {
   const username = field('username', 'Username', 'text', 'username', 'minlength="3" maxlength="24" pattern="[a-zA-Z0-9_]+" autocapitalize="none"');
   const actions = {
     'sign-in': [emailField + field('password', 'Password', 'password', 'current-password'), 'Sign in'],
-    claim: [emailField, 'Check my email'],
-    choose: [username + '<p class="hint">Use 3–24 letters, numbers or underscores.</p>' + password + '<p class="hint">Use at least 8 characters.</p>', 'Continue'],
-    verify: [field('code', 'Verification code', 'text', 'one-time-code', 'inputmode="numeric" pattern="[0-9]{6,10}"'), 'Verify and enter'],
-    finish: [username + password, 'Save and enter'],
+    claim: [emailField, 'Send verification code'],
+    verify: [field('code', 'Verification code', 'text', 'one-time-code', 'inputmode="numeric" pattern="[0-9]{6,10}" maxlength="10"'), 'Verify email'],
+    finish: [username + '<p class="hint">Use 3–24 letters, numbers or underscores.</p>' + password + '<p class="hint">Use at least 8 characters.</p>', 'Enter the library'],
     forgot: [emailField, 'Send reset link'],
     reset: [password, 'Save password'],
   };
@@ -59,11 +59,12 @@ function authForm() {
   const [title, detail] = authViews[view];
   const form = action ? `<form id="auth-form"><fieldset>${action[0]}<button class="button" type="submit">${action[1]}</button></fieldset><p class="feedback" role="status" id="form-message"></p></form>` : '';
   return `<div class="entry"><aside class="entry-cover"><span class="eyebrow">A circle of sacred reading</span><span class="cover-ornament" aria-hidden="true">✳</span><p>Read.<br> Reflect.<br> Remember.</p><span class="cover-foot">Briggs’ Book Club</span></aside>
-    <section class="entry-form"><p class="eyebrow">Members’ replay library</p><h1>${title}</h1><p class="lede">${detail}</p>${form}
+    <section class="entry-form"><p class="eyebrow">Members’ replay library</p><h1>${title}</h1><p class="lede">${detail}${view === 'verify' ? ` The code was sent to <strong class="claim-email">${label(email)}</strong>.` : ''}</p>${form}
     ${view === 'sign-in' ? '<div class="entry-links"><button class="text-button" data-view="claim">Claim your account</button><button class="text-button" data-view="forgot">Forgot password?</button></div>' : ''}
-    ${['claim', 'forgot', 'choose'].includes(view) ? '<button class="text-button" data-view="sign-in">Back to sign in</button>' : ''}
-    ${view === 'verify' ? '<button class="text-button" data-view="claim">Start again</button>' : ''}
-    ${view === 'blocked' ? '<button class="button" data-action="sign-out">Sign out</button>' : ''}
+    ${['claim', 'forgot'].includes(view) ? '<button class="text-button" data-view="sign-in">Back to sign in</button>' : ''}
+    ${view === 'verify' ? '<div class="entry-links"><button class="text-button" data-action="resend">Send code again</button><button class="text-button" data-view="claim">Change email</button></div>' : ''}
+    ${view === 'reset-expired' ? '<button class="button" data-view="forgot">Request a new link</button>' : ''}
+    ${['finish', 'blocked'].includes(view) ? '<button class="text-button" data-action="sign-out">Sign out</button>' : ''}
     ${demo ? '<div class="preview-entry"><span>Local preview</span><button class="text-button" data-action="demo">Explore the library →</button></div>' : ''}
     </section></div>`;
 }
@@ -164,14 +165,33 @@ async function saveProfile(sessionUser, details) {
     if (passwordError && passwordError.code !== 'same_password') throw passwordError;
     const { error } = await supabase.from('profiles').insert({ id: sessionUser.id, username: details.username });
     if (error?.code === '23505') {
-      show('finish');
-      document.querySelector('#form-message').textContent = 'That username is taken. Choose another and use the password you just set.';
+      const { data: existing, error: lookupError } = await supabase.from('profiles').select('id').eq('id', sessionUser.id).maybeSingle();
+      if (lookupError) throw lookupError;
+      if (existing) return openMember(sessionUser);
+      document.querySelector('#form-message').textContent = 'That username is taken. Choose another and use the password you just entered.';
       return;
     }
     if (error) throw error;
   }
-  draft = null;
   await openMember(sessionUser);
+}
+
+async function sendCode() {
+  const { error } = await supabase.auth.signInWithOtp({ email });
+  if (error) throw error;
+}
+
+function resetUrl() {
+  const target = new URL(location.pathname, location.origin);
+  target.searchParams.set('recover', '1');
+  return target;
+}
+
+function clearResetUrl() {
+  const current = new URL(location.href);
+  current.searchParams.delete('recover');
+  current.hash = '';
+  history.replaceState(null, '', current);
 }
 
 async function handleAuth(values) {
@@ -179,24 +199,12 @@ async function handleAuth(values) {
   const password = values.get('password');
   const username = String(values.get('username') || '').toLowerCase();
   if (view === 'claim') {
-    const { error } = await supabase.auth.signInWithOtp({ email });
-    if (error) throw error;
-    show('choose');
-  } else if (view === 'choose') {
-    draft = { username, password };
+    await sendCode();
     show('verify');
   } else if (view === 'verify') {
     const { data, error } = await supabase.auth.verifyOtp({ email, token: values.get('code'), type: 'email' });
     if (error) throw error;
-    try {
-      await saveProfile(data.user, draft);
-    } catch (saveError) {
-      await openMember(data.user);
-      if (view === 'finish') document.querySelector('#form-message').textContent = 'Email confirmed. Try saving your username and password again.';
-      else if (view !== 'library' && view !== 'blocked') throw saveError;
-    } finally {
-      draft = null;
-    }
+    await openMember(data.user);
   } else if (view === 'finish') {
     const { data, error } = await supabase.auth.getUser();
     if (error) throw error;
@@ -206,56 +214,76 @@ async function handleAuth(values) {
     if (error) throw error;
     await openMember(data.user);
   } else if (view === 'forgot') {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${location.origin}${location.pathname}` });
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: resetUrl().href });
     if (error) throw error;
     document.querySelector('#form-message').textContent = 'If there’s an account for this email, a reset link is on its way.';
   } else if (view === 'reset') {
+    const { data: allowed, error: accessError } = await supabase.rpc('member_has_access');
+    if (accessError) throw accessError;
+    if (!allowed) {
+      clearResetUrl();
+      return show('blocked');
+    }
     const { data, error } = await supabase.auth.updateUser({ password });
     if (error) throw error;
     recovery = false;
+    clearResetUrl();
     await openMember(data.user);
   }
 }
 
 function authError(error) {
   if (error.code === 'invalid_credentials') return 'Check your email and password and try again.';
-  if (error.code === 'otp_expired') return 'That code has expired or doesn’t match. Check your email or start again.';
-  if (error.status === 429) return 'Too many attempts. Wait a moment before trying again.';
+  if (error.code === 'otp_expired' || error.code === 'invalid_otp') return 'That code has expired or doesn’t match. Use the latest code, or select Send code again.';
+  if (error.status === 429) return 'Too many attempts. Wait at least a minute before trying again.';
   if (error.status === 403 || error.code === 'hook_payload_invalid') return 'Use the email you joined the book club with, or contact the organiser.';
   if (error.code === 'same_password') return 'Choose a password you haven’t just used.';
   if (error.code === 'weak_password') return 'Choose a stronger password and try again.';
   return 'Something went wrong. Try again in a moment.';
 }
 
-app.addEventListener('submit', async (event) => {
-  if (event.target.id !== 'auth-form') return;
-  event.preventDefault();
-  const values = new FormData(event.target);
-  const fields = event.target.querySelector('fieldset');
-  const message = event.target.querySelector('.feedback');
+async function runAuth(form, action, extraButton) {
+  if (authPending) return;
+  const fields = form.querySelector('fieldset');
+  const message = form.querySelector('.feedback');
   if (demo) {
     message.textContent = 'Account access is available once Supabase is connected. You can explore the sample library below.';
     return;
   }
   fields.disabled = true;
+  if (extraButton) extraButton.disabled = true;
   authPending = true;
   message.textContent = '';
   try {
-    await handleAuth(values);
+    await action(message);
   } catch (error) {
     message.textContent = authError(error);
   } finally {
     fields.disabled = false;
+    if (extraButton) extraButton.disabled = false;
     authPending = false;
   }
+}
+
+app.addEventListener('submit', (event) => {
+  if (event.target.id !== 'auth-form') return;
+  event.preventDefault();
+  const values = new FormData(event.target);
+  void runAuth(event.target, () => handleAuth(values));
 });
 
 app.addEventListener('click', async (event) => {
   const button = event.target.closest('button');
   if (!button || authPending) return;
   if (button.dataset.view) {
-    draft = null;
+    if (view === 'reset-expired') clearResetUrl();
     show(button.dataset.view);
+  }
+  if (button.dataset.action === 'resend') {
+    await runAuth(document.querySelector('#auth-form'), async (message) => {
+      await sendCode();
+      message.textContent = 'A new code is on its way. Use the most recent email.';
+    }, button);
   }
   if (button.dataset.action === 'demo') openPreview();
   if (button.dataset.action === 'browse') document.querySelector('#texts-heading').focus();
@@ -277,6 +305,7 @@ function openPreview() {
 }
 
 async function toggleWatched(button) {
+  const memberAtStart = user;
   const id = button.dataset.sitting;
   const done = watched.has(id);
   button.disabled = true;
@@ -286,6 +315,7 @@ async function toggleWatched(button) {
       const table = supabase.from('watched');
       const { error } = await (done ? table.delete().match(row) : table.upsert(row, { ignoreDuplicates: true }));
       if (error) throw error;
+      if (user !== memberAtStart) return;
     }
     if (done) watched.delete(id);
     else watched.add(id);
@@ -317,7 +347,6 @@ function clearLibrary() {
   user = null;
   texts = [];
   watched = new Set();
-  draft = null;
   recovery = false;
   history.replaceState(null, '', location.pathname);
   show('sign-in');
@@ -335,7 +364,6 @@ document.querySelector('.skip-link').addEventListener('click', (event) => {
 if (demo && (location.hash === '#library' || location.hash.startsWith('#text/'))) openPreview();
 else render();
 if (supabase) {
-  const recoveryRequested = new URLSearchParams(location.hash.slice(1)).get('type') === 'recovery';
   supabase.auth.onAuthStateChange((event) => {
     if (event === 'PASSWORD_RECOVERY') {
       recovery = true;
@@ -344,9 +372,12 @@ if (supabase) {
     if (event === 'SIGNED_OUT' && view !== 'loading') clearLibrary();
   });
   supabase.auth.getSession().then(async ({ data, error }) => {
+    if (authCallback.get('type') === 'recovery' && data.session?.access_token &&
+        data.session.access_token === authCallback.get('access_token')) recovery = true;
+    if (resetRequested && !recovery) return show('reset-expired');
     if (error) throw error;
-    if (recovery || (recoveryRequested && data.session)) show('reset');
+    if (recovery) show('reset');
     else if (data.session) await openMember(data.session.user);
     else show(entryView(), false);
-  }).catch(() => show('error'));
+  }).catch(() => show(resetRequested && !recovery ? 'reset-expired' : 'error'));
 } else if (!demo) show('error');
