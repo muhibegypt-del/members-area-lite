@@ -10,7 +10,7 @@ Use a current LTS Node release that supports Vite. Run `npm ci` and `npm run dev
 
 1. Open the Supabase project’s **Connect** dialog and copy its project URL and publishable key into `.env.local` using `.env.example` as the template. The browser build only needs those two public values.
 2. Apply the SQL in `supabase/migrations/20261106000000_members_library.sql` via the Supabase CLI or SQL Editor. In **Authentication → Hooks**, enable **Before User Created** and select `public.before_user_created`.
-3. Enable the email provider, email signups and email confirmation. Keep unused sign-in providers and anonymous signup disabled. Configure [custom SMTP](https://supabase.com/docs/guides/auth/auth-smtp) for club members. In the **Magic Link** email template use `{{ .Token }}` to send a code for the claim flow. Keep the reset-password template set up with its recovery link. Set the Auth site URL and allow the preview and production URLs used for password resets.
+3. Enable the email provider, email signups and email confirmation. Keep unused sign-in providers and anonymous signup disabled. Configure [custom SMTP](https://supabase.com/docs/guides/auth/auth-smtp) for club members. Use `{{ .Token }}` in both **Confirm sign up** and **Magic link or OTP**. New or unconfirmed accounts receive the confirmation email, while confirmed accounts receive the magic-link or OTP email. Keep the reset-password template set up with its recovery link. Set the Auth site URL and allow the preview and production URLs used for password resets.
 4. Add a test member address in the SQL Editor before importing the real roster. Enter a lower-case email with no surrounding spaces.
 
    ```sql
