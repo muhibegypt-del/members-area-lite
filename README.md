@@ -4,12 +4,12 @@ A small members area for watching sittings, finding reading resources and markin
 
 ## Preview with sample data
 
-Use a current LTS Node release that supports Vite. Run `npm ci` and `npm run dev`. Open the printed local URL and choose **Explore the library**. Both Supabase settings should be empty for this preview. Sample sittings are fictional and show a placeholder player. Preview progress stays in your browser.
+Use a current LTS Node release that supports Vite. Run `npm ci` and `npm run dev:demo`. Open the printed local URL and choose **Explore the library**. The demo mode keeps preview progress in your browser and uses fictional sittings unless a local preview catalogue is configured. Use `npm run dev` to test real signup and login with Supabase.
 
 ## Connect Supabase
 
 1. Open the Supabase project’s **Connect** dialog and copy its project URL and publishable key into `.env.local` using `.env.example` as the template. The browser build only needs those two public values.
-2. Apply the SQL in `supabase/migrations/20261106000000_members_library.sql` via the Supabase CLI or SQL Editor. In **Authentication → Hooks**, enable **Before User Created** and select `public.before_user_created`.
+2. Apply the SQL files in `supabase/migrations/` in filename order via the Supabase CLI or SQL Editor. In **Authentication → Hooks**, enable **Before User Created** and select `public.before_user_created`.
 3. Enable the email provider, email signups and email confirmation. Keep unused sign-in providers and anonymous signup disabled. Configure [custom SMTP](https://supabase.com/docs/guides/auth/auth-smtp) for club members. Use `{{ .Token }}` in both **Confirm sign up** and **Magic link or OTP**. New or unconfirmed accounts receive the confirmation email, while confirmed accounts receive the magic-link or OTP email. Keep the reset-password template set up with its recovery link. Set the Auth site URL and allow the preview and production URLs used for password resets.
 4. Add a test member address in the SQL Editor before importing the real roster. Enter a lower-case email with no surrounding spaces.
 
@@ -24,7 +24,7 @@ The roster stays in a private schema. Database policies check current membership
 
 ## Add the first text and replay
 
-Add a row to `public.texts` with an ID, title and subtitle. In `public.sittings`, use the Drive file ID as `id`, the text’s ID as `text_id`, and set a title and `recorded_on` date. Add optional HTTPS resource links to `public.resources` using the same `text_id`.
+Add a row to `public.texts` with an ID, title and subtitle. In `public.sittings`, use the Drive file ID as `id`, the text’s ID as `text_id`, and set a title and a `position` for playback order. Add `recorded_on` if you know the recording date. Add optional HTTPS resource links to `public.resources` using the same `text_id`.
 
 Share the replay folder as **Viewer** with the club’s Google accounts or private Google Group. Keep the folder and files **Restricted**. Test the embedded player and **Open in Drive** using a member account, and check that an outside account can neither claim a dashboard account nor open the Drive replay.
 

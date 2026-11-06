@@ -4,8 +4,9 @@ import './style.css';
 
 const url = import.meta.env.VITE_SUPABASE_URL;
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-const demo = !url && !key;
-const supabase = url && key ? createClient(url, key) : null;
+const demo = (import.meta.env.DEV && import.meta.env.MODE === 'demo') || (!url && !key);
+const demoArchive = import.meta.env.DEV && import.meta.env.VITE_DEMO_CATALOGUE;
+const supabase = !demo && url && key ? createClient(url, key) : null;
 const app = document.querySelector('#app');
 const dateFormat = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 
@@ -23,7 +24,7 @@ const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => 
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 })[char]);
 const label = escapeHtml;
-const date = (value) => dateFormat.format(new Date(`${value}T00:00:00Z`));
+const date = (value) => value ? dateFormat.format(new Date(`${value}T00:00:00Z`)) : '';
 const textLink = (text, sitting) => `#text/${encodeURIComponent(text.id)}${sitting ? `/${encodeURIComponent(sitting.id)}` : ''}`;
 
 const authViews = {
@@ -63,36 +64,51 @@ function authForm() {
     ${['claim', 'forgot', 'choose'].includes(view) ? '<button class="text-button" data-view="sign-in">Back to sign in</button>' : ''}
     ${view === 'verify' ? '<button class="text-button" data-view="claim">Start again</button>' : ''}
     ${view === 'blocked' ? '<button class="button" data-action="sign-out">Sign out</button>' : ''}
-    ${demo ? '<div class="preview-entry"><span>Design preview · sample sittings</span><button class="text-button" data-action="demo">Explore the library →</button></div>' : ''}
+    ${demo ? '<div class="preview-entry"><span>Local preview</span><button class="text-button" data-action="demo">Explore the library →</button></div>' : ''}
     </section></div>`;
 }
 
-function library() {
-  const nextText = texts.find((text) => text.sittings.some((sitting) => !watched.has(sitting.id)));
-  const next = nextText?.sittings.find((sitting) => !watched.has(sitting.id));
-  const cards = texts.map((text, index) => {
+function textCards() {
+  return texts.map((text, index) => {
     const complete = text.sittings.filter((sitting) => watched.has(sitting.id)).length;
     return `<a class="text-card" href="${textLink(text)}"><div class="bookplate bookplate-${index % 2}" aria-hidden="true"><span>✳</span><span>${String(index + 1).padStart(2, '0')}</span></div><div><h3>${label(text.title)}</h3><p>${label(text.subtitle)}</p><small>${complete} of ${text.sittings.length} sittings watched</small></div><span class="card-arrow" aria-hidden="true">→</span></a>`;
   }).join('');
-  return `<div class="page"><section class="library-heading"><p class="eyebrow"><span aria-hidden="true">✳</span> The reading circle</p><h1>Replay library</h1><p class="lede">Return to a sitting, revisit a passage, or pick up with the next reading.</p></section>
-    ${next ? `<section class="continue"><div><p class="eyebrow">Continue watching</p><h2>${label(nextText.title)}</h2><p>${label(next.title)} <span aria-hidden="true">·</span> ${date(next.recorded_on)}</p></div><a class="button" href="${textLink(nextText, next)}">Open sitting <span aria-hidden="true">→</span></a></section>` : ''}
-    <section class="texts"><h2>The Texts</h2><div class="text-grid">${cards || '<p>The library is waiting for its first text.</p>'}</div></section></div>`;
+}
+
+function nextUnwatched(text) {
+  return text.sittings.find((sitting) => !watched.has(sitting.id));
+}
+
+function library() {
+  const nextText = texts.find(nextUnwatched);
+  const featuredText = nextText || texts.find((text) => text.sittings.length);
+  const featured = featuredText && (nextUnwatched(featuredText) || featuredText.sittings[0]);
+  return `<div class="page library-page"><section class="library-heading"><div><p class="eyebrow"><span aria-hidden="true">✳</span> The reading circle</p><h1>Replay library</h1><p class="lede">Pick up with the next sitting or return to a text below.</p></div>${texts.length ? '<button class="button secondary" data-action="browse">Browse all texts <span aria-hidden="true">↓</span></button>' : ''}</section>
+    ${featured ? `<section aria-label="${nextText ? 'Continue watching' : 'Watch again'}"><div class="featured-heading"><p class="eyebrow">${nextText ? 'Continue watching' : 'Watch again'}</p><h2>${label(featuredText.title)}</h2></div>${sittingPanel(featuredText, featured)}</section>` : '<p class="empty-library">Replays will appear here once recordings are added.</p>'}
+    ${texts.length ? `<section class="texts"><h2 id="texts-heading" tabindex="-1">The Texts</h2><div class="text-grid">${textCards()}</div></section>` : ''}</div>`;
+}
+
+function sittingSidebar(text, sitting) {
+  const completed = text.sittings.filter((item) => watched.has(item.id)).length;
+  const resources = text.resources.filter((resource) => /^https:\/\//i.test(resource.url)).map((resource) => `<li><a href="${label(resource.url)}" target="_blank" rel="noopener noreferrer">${label(resource.title)} ↗</a></li>`).join('');
+  return `<aside class="course-sidebar"><section><div class="list-heading"><h2>Sittings</h2><p>${completed} of ${text.sittings.length} watched</p></div>
+    <ol class="sitting-list">${text.sittings.map((item, i) => `<li><a href="${textLink(text, item)}" ${item.id === sitting?.id ? 'aria-current="true"' : ''}><span class="sitting-number">${watched.has(item.id) ? '<span aria-label="Watched">✓</span>' : String(i + 1).padStart(2, '0')}</span><span>${label(item.title)}${item.recorded_on ? `<small>${date(item.recorded_on)}</small>` : ''}</span></a></li>`).join('')}</ol></section>
+    <section class="resources"><h2>Resources</h2>${resources ? `<ul>${resources}</ul>` : '<p>Reading guides and translation instalments will appear here.</p>'}</section></aside>`;
+}
+
+function sittingPanel(text, sitting) {
+  const currentWatched = sitting && watched.has(sitting.id);
+  const drive = sitting && (!demo || demoArchive) ? `https://drive.google.com/file/d/${encodeURIComponent(sitting.id)}` : '';
+  const player = drive ? `<iframe class="player" src="${drive}/preview" title="Replay of ${label(sitting.title)}" allow="fullscreen" allowfullscreen></iframe>` : `<div class="player placeholder"><span aria-hidden="true">✳</span><p>${sitting ? 'Sample sitting' : 'No sittings yet'}</p></div>`;
+  return `<div class="course-layout"><section class="watch-pane" aria-label="Selected sitting">${player}
+    ${sitting ? `<div class="watch-details"><div>${sitting.recorded_on ? `<p class="eyebrow">${date(sitting.recorded_on)}</p>` : ''}<h2>${label(sitting.title)}</h2></div><button class="button secondary" aria-pressed="${Boolean(currentWatched)}" data-action="watched" data-text="${label(text.id)}" data-sitting="${label(sitting.id)}">${currentWatched ? '✓ Watched' : 'Mark as watched'}</button></div>` : ''}
+    ${drive ? `<a class="back" href="${drive}/view" target="_blank" rel="noopener noreferrer">Open in Drive ↗</a>` : ''}<p class="feedback" role="status" id="watch-message"></p></section>
+    ${sittingSidebar(text, sitting)}</div>`;
 }
 
 function textPage(text, sittingId) {
-  const sitting = text.sittings.find((item) => item.id === sittingId) || text.sittings[0];
-  const completed = text.sittings.filter((item) => watched.has(item.id)).length;
-  const currentWatched = sitting && watched.has(sitting.id);
-  const drive = sitting && !demo ? `https://drive.google.com/file/d/${encodeURIComponent(sitting.id)}` : '';
-  const player = drive ? `<iframe class="player" src="${drive}/preview" title="Replay of ${label(sitting.title)}" allow="fullscreen" allowfullscreen></iframe>` : `<div class="player placeholder"><span aria-hidden="true">✳</span><p>${sitting ? 'Sample sitting' : 'No sittings yet'}</p></div>`;
-  const resources = text.resources.filter((resource) => /^https:\/\//i.test(resource.url)).map((resource) => `<li><a href="${label(resource.url)}" target="_blank" rel="noopener noreferrer">${label(resource.title)} ↗</a></li>`).join('');
-  return `<div class="page course-page"><a class="back" href="#library">← Replay library</a><header class="course-heading"><p class="eyebrow">The texts</p><h1>${label(text.title)}</h1><p class="lede">${label(text.subtitle)}</p></header>
-    <div class="course-layout"><section class="watch-pane" aria-label="Selected sitting">${player}
-      ${sitting ? `<div class="watch-details"><div><p class="eyebrow">${date(sitting.recorded_on)}</p><h2>${label(sitting.title)}</h2></div><button class="button secondary" aria-pressed="${Boolean(currentWatched)}" data-action="watched" data-sitting="${label(sitting.id)}">${currentWatched ? '✓ Watched' : 'Mark as watched'}</button></div>` : ''}
-      ${drive ? `<a class="back" href="${drive}/view" target="_blank" rel="noopener noreferrer">Open in Drive ↗</a>` : ''}<p class="feedback" role="status" id="watch-message"></p></section>
-      <aside class="course-sidebar"><section><div class="list-heading"><h2>Sittings</h2><p>${completed} of ${text.sittings.length} watched</p></div>
-      <ol class="sitting-list">${text.sittings.map((item, i) => `<li><a href="${textLink(text, item)}" ${item.id === sitting?.id ? 'aria-current="true"' : ''}><span class="sitting-number">${watched.has(item.id) ? '<span aria-label="Watched">✓</span>' : String(i + 1).padStart(2, '0')}</span><span>${label(item.title)}<small>${date(item.recorded_on)}</small></span></a></li>`).join('')}</ol></section>
-      <section class="resources"><h2>Resources</h2>${resources ? `<ul>${resources}</ul>` : '<p>Reading guides and translation instalments will appear here.</p>'}</section></aside></div></div>`;
+  const sitting = text.sittings.find((item) => encodeURIComponent(item.id) === sittingId) || nextUnwatched(text) || text.sittings[0];
+  return `<div class="page course-page"><a class="back" href="#library">← Replay library</a><header class="course-heading"><p class="eyebrow">The texts</p><h1>${label(text.title)}</h1><p class="lede">${label(text.subtitle)}</p></header>${sittingPanel(text, sitting)}</div>`;
 }
 
 function render() {
@@ -108,7 +124,10 @@ function render() {
 function show(next, focus = true) {
   view = next;
   render();
-  if (focus) document.querySelector('#main').focus();
+  if (focus) {
+    document.querySelector('#main').focus({ preventScroll: true });
+    window.scrollTo(0, 0);
+  }
 }
 
 function goLibrary() {
@@ -125,7 +144,7 @@ async function openMember(sessionUser) {
   user = { id: sessionUser.id, username: profile?.username };
   if (!profile) return show('finish');
   const [catalogue, progress] = await Promise.all([
-    supabase.from('texts').select('id,title,subtitle,sittings(id,title,recorded_on),resources(id,title,url)').order('position').order('id').order('recorded_on', { referencedTable: 'sittings' }).order('id', { referencedTable: 'sittings' }).order('id', { referencedTable: 'resources' }),
+    supabase.from('texts').select('id,title,subtitle,sittings(id,title,recorded_on),resources(id,title,url)').order('position').order('id').order('position', { referencedTable: 'sittings' }).order('recorded_on', { referencedTable: 'sittings' }).order('id', { referencedTable: 'sittings' }).order('id', { referencedTable: 'resources' }),
     supabase.from('watched').select('sitting_id').eq('member_id', user.id),
   ]);
   if (catalogue.error || progress.error) throw catalogue.error || progress.error;
@@ -238,12 +257,8 @@ app.addEventListener('click', async (event) => {
     draft = null;
     show(button.dataset.view);
   }
-  if (button.dataset.action === 'demo') {
-    texts = sampleTexts;
-    try { watched = new Set(JSON.parse(localStorage.getItem('briggs-preview-watched') || '[]')); }
-    catch { watched = new Set(); }
-    goLibrary();
-  }
+  if (button.dataset.action === 'demo') openPreview();
+  if (button.dataset.action === 'browse') document.querySelector('#texts-heading').focus();
   if (button.dataset.action === 'sign-out') {
     if (!demo) {
       const { error } = await supabase.auth.signOut({ scope: 'local' });
@@ -253,6 +268,13 @@ app.addEventListener('click', async (event) => {
   }
   if (button.dataset.action === 'watched') await toggleWatched(button);
 });
+
+function openPreview() {
+  texts = demoArchive ? JSON.parse(demoArchive) : sampleTexts;
+  try { watched = new Set(JSON.parse(localStorage.getItem('briggs-preview-watched') || '[]')); }
+  catch { watched = new Set(); }
+  goLibrary();
+}
 
 async function toggleWatched(button) {
   const id = button.dataset.sitting;
@@ -273,10 +295,11 @@ async function toggleWatched(button) {
       button.disabled = false;
       const main = document.querySelector('#main');
       const template = document.createElement('template');
-      const [, textId] = location.hash.split('/');
-      const text = texts.find((item) => encodeURIComponent(item.id) === textId);
-      template.innerHTML = textPage(text, id);
+      const text = texts.find((item) => item.id === button.dataset.text);
+      template.innerHTML = sittingSidebar(text, text.sittings.find((item) => item.id === id));
       main.querySelector('.course-sidebar').replaceWith(template.content.querySelector('.course-sidebar'));
+      const textGrid = main.querySelector('.text-grid');
+      if (textGrid) textGrid.innerHTML = textCards();
       button.textContent = done ? 'Mark as watched' : '✓ Watched';
       button.setAttribute('aria-pressed', String(!done));
       main.querySelector('#watch-message').textContent = done ? 'Marked as unwatched.' : 'Progress saved.';
@@ -309,7 +332,8 @@ document.querySelector('.skip-link').addEventListener('click', (event) => {
   document.querySelector('#main').focus();
 });
 
-render();
+if (demo && (location.hash === '#library' || location.hash.startsWith('#text/'))) openPreview();
+else render();
 if (supabase) {
   const recoveryRequested = new URLSearchParams(location.hash.slice(1)).get('type') === 'recovery';
   supabase.auth.onAuthStateChange((event) => {
