@@ -4,6 +4,9 @@ create table private.member_emails (
   email text primary key check (email = lower(trim(email)) and email <> '')
 );
 
+alter table private.member_emails enable row level security;
+revoke all on private.member_emails from public, anon, authenticated;
+
 create function public.before_user_created(event jsonb)
 returns jsonb
 language plpgsql
