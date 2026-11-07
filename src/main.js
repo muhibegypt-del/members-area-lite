@@ -288,11 +288,11 @@ app.addEventListener('click', async (event) => {
   if (button.dataset.action === 'demo') openPreview();
   if (button.dataset.action === 'browse') document.querySelector('#texts-heading').focus();
   if (button.dataset.action === 'sign-out') {
-    if (!demo) {
+    if (demo) clearLibrary();
+    else {
       const { error } = await supabase.auth.signOut({ scope: 'local' });
       if (error) return show('error');
     }
-    clearLibrary();
   }
   if (button.dataset.action === 'watched') await toggleWatched(button);
 });
